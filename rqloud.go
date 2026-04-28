@@ -209,14 +209,18 @@ func (s *Server) Start() error {
 		}
 	}
 
-	// Wait for a leader to be elected before returning, so callers can
-	// immediately use the database.
-	s.logger.Println("waiting for leader election...")
-	leader, err := str.WaitForLeader(30 * time.Second)
-	if err != nil {
-		return fmt.Errorf("wait for leader: %w", err)
+	// Wait for the store to be fully ready (leader elected, all channels
+	// registered, etc.) before returning so callers can use the database.
+	s.logger.Println("waiting for store to be ready...")
+	deadline := time.Now().Add(30 * time.Second)
+	for !str.Ready() {
+		if time.Now().After(deadline) {
+			return fmt.Errorf("store did not become ready within timeout")
+		}
+		time.Sleep(100 * time.Millisecond)
 	}
-	s.logger.Printf("leader elected: %s", leader)
+	leader, _ := str.LeaderAddr()
+	s.logger.Printf("store ready, leader: %s", leader)
 
 	// Tell the user the node is ready for HTTP, giving some advice on how to connect.
 	s.logger.Printf("connect using the command-line tool via 'rqlite -H %s -p %d'", s.Hostname, defaultHTTPPort)
