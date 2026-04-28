@@ -97,6 +97,21 @@ func (s *Server) Start() error {
 		return fmt.Errorf("tailnet: %w", err)
 	}
 
+	// Get our tailnet IP for advertising to peers.
+	lc, err := s.ts.LocalClient()
+	if err != nil {
+		return fmt.Errorf("get local client: %w", err)
+	}
+	st, err := lc.Status(context.Background())
+	if err != nil {
+		return fmt.Errorf("get status: %w", err)
+	}
+	if len(st.Self.TailscaleIPs) == 0 {
+		return fmt.Errorf("no tailscale IPs assigned")
+	}
+	tsIP := st.Self.TailscaleIPs[0].String()
+	s.logger.Printf("tailnet IP: %s", tsIP)
+
 	// Listen on the mux port for internode traffic (Raft + cluster).
 	muxLn, err := s.ts.Listen("tcp", fmt.Sprintf(":%d", defaultMuxPort))
 	if err != nil {
@@ -115,14 +130,14 @@ func (s *Server) Start() error {
 	raftLn := mux.Listen(cluster.MuxRaftHeader)
 	raftLayer := &tsnetRaftLayer{
 		ln:     raftLn,
-		addr:   NewAddr(s.Hostname, defaultMuxPort),
+		addr:   NewAddr(tsIP, defaultMuxPort),
 		dialer: &tsnetDialer{srv: s.ts, header: cluster.MuxRaftHeader},
 	}
 
 	// Create the rqlite store.
 	nodeID := s.Hostname
-	raftAddr := net.JoinHostPort(s.Hostname, strconv.Itoa(defaultMuxPort))
-	httpAddr := net.JoinHostPort(s.Hostname, strconv.Itoa(defaultHTTPPort))
+	raftAddr := net.JoinHostPort(tsIP, strconv.Itoa(defaultMuxPort))
+	httpAddr := net.JoinHostPort(tsIP, strconv.Itoa(defaultHTTPPort))
 
 	str := store.New(&store.Config{
 		DBConf: store.NewDBConfig(),
@@ -252,11 +267,11 @@ func (p *tailnetAddressProvider) Lookup() ([]string, error) {
 
 	var peers []string
 	for _, peer := range st.Peer {
-		if !peer.Online {
+		if !peer.Online || len(peer.TailscaleIPs) == 0 {
 			continue
 		}
 		if strings.HasPrefix(peer.HostName, prefix) && peer.HostName != p.srv.Hostname {
-			peers = append(peers, net.JoinHostPort(peer.HostName, strconv.Itoa(defaultMuxPort)))
+			peers = append(peers, net.JoinHostPort(peer.TailscaleIPs[0].String(), strconv.Itoa(defaultMuxPort)))
 		}
 	}
 	if len(peers) > 0 {
