@@ -36,13 +36,15 @@ button { font-size: 32px; padding: 10px 30px; margin: 5px; cursor: pointer; }
 func main() {
 	instance := flag.String("instance", "counter", "tsnet hostname for this instance")
 	dataDir := flag.String("data-dir", "", "data directory (default: auto)")
+	bootstrapExpect := flag.Int("bootstrap-expect", 0, "number of nodes expected to form initial cluster")
 	verbose := flag.Bool("verbose", false, "enable verbose logging")
 	flag.Parse()
 
 	srv := &rqloud.Server{
-		Hostname: *instance,
-		Dir:      *dataDir,
-		Verbose:  *verbose,
+		Hostname:        *instance,
+		Dir:             *dataDir,
+		BootstrapExpect: *bootstrapExpect,
+		Verbose:         *verbose,
 	}
 
 	if err := srv.Start(); err != nil {

@@ -47,6 +47,12 @@ type Server struct {
 	// AdvertiseTags is a list of ACL tags to advertise (e.g. "tag:todo").
 	AdvertiseTags []string
 
+	// BootstrapExpect is the number of nodes expected to form the initial
+	// cluster. When set, nodes use the notify/bootstrap protocol to
+	// coordinate simultaneous startup. When 0 (default), the first node
+	// bootstraps solo and others join it.
+	BootstrapExpect int
+
 	// Verbose enables verbose tsnet logging.
 	Verbose bool
 
@@ -84,6 +90,7 @@ func (s *Server) Start() error {
 		Hostname:      s.Hostname,
 		Dir:           filepath.Join(s.Dir, "tsnet"),
 		AuthKey:       s.AuthKey,
+		ControlURL:    os.Getenv("RQLOUD_CONTROL_URL"),
 		AdvertiseTags: s.AdvertiseTags,
 	}
 	if s.Verbose {
@@ -208,6 +215,9 @@ func (s *Server) Start() error {
 	} else {
 		// New node with a cluster prefix. Use the Bootstrapper to try joining
 		// an existing cluster or forming one with simultaneously-starting nodes.
+		if s.BootstrapExpect > 0 {
+			str.BootstrapExpect = s.BootstrapExpect
+		}
 		provider := &tailnetAddressProvider{srv: s}
 		bs := cluster.NewBootstrapper(provider, clstrClient)
 		bootDone := func() bool {
@@ -241,7 +251,41 @@ func (s *Server) Start() error {
 	s.logger.Printf("connect using the command-line tool via 'rqlite -H %s -p %d'", s.Hostname, defaultHTTPPort)
 	s.logger.Printf("visit the rqlite console for this node at http://%s/console/", net.JoinHostPort(s.Hostname, strconv.Itoa(defaultHTTPPort)))
 
+	if s.Verbose {
+		go s.periodicStatus()
+	}
+
 	return nil
+}
+
+func (s *Server) periodicStatus() {
+	for {
+		time.Sleep(15 * time.Second)
+		// Tailnet status.
+		if lc, err := s.ts.LocalClient(); err == nil {
+			if st, err := lc.Status(context.Background()); err == nil {
+				var peerNames []string
+				for _, p := range st.Peer {
+					status := "offline"
+					if p.Online {
+						status = "online"
+					}
+					peerNames = append(peerNames, fmt.Sprintf("%s(%s)", p.HostName, status))
+				}
+				s.logger.Printf("[status] tailnet peers: %v", peerNames)
+			}
+		}
+		// Store status.
+		if s.store != nil {
+			leader, _ := s.store.LeaderAddr()
+			nodes, _ := s.store.Nodes()
+			var nodeIDs []string
+			for _, n := range nodes {
+				nodeIDs = append(nodeIDs, n.ID)
+			}
+			s.logger.Printf("[status] leader=%s nodes=%v ready=%v", leader, nodeIDs, s.store.Ready())
+		}
+	}
 }
 
 // tailnetAddressProvider implements cluster.AddressProvider by discovering
