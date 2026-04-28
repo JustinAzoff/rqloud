@@ -2,6 +2,7 @@
 package main
 
 import (
+	"context"
 	"database/sql"
 	"flag"
 	"fmt"
@@ -89,7 +90,9 @@ func main() {
 	}
 	defer srv.Close()
 
-	if err := srv.Wait(300 * time.Second); err != nil {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
+	if err := srv.Wait(ctx); err != nil {
 		log.Fatalf("wait: %v", err)
 	}
 

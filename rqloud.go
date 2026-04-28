@@ -12,11 +12,12 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/rqlite/gorqlite"
-	_ "github.com/rqlite/gorqlite/stdlib"
 	"github.com/rqlite/rqlite/v10/cluster"
+	command "github.com/rqlite/rqlite/v10/command/proto"
 	httpd "github.com/rqlite/rqlite/v10/http"
 	"github.com/rqlite/rqlite/v10/proxy"
 	"github.com/rqlite/rqlite/v10/store"
@@ -56,13 +57,9 @@ type Server struct {
 	mux         *tcp.Mux
 	muxLn       net.Listener
 
-	// localHTTPLn is a localhost-only listener for the rqlite HTTP API,
-	// used by the database/sql driver which can't use a custom HTTP client.
-	localHTTPLn  net.Listener
-	localHTTPSrv *httpd.Service
-
-	db      *sql.DB
-	grqConn *gorqlite.Connection
+	driverName string
+	db         *sql.DB
+	grqConn    *gorqlite.Connection
 
 	logger *log.Logger
 }
@@ -165,35 +162,57 @@ func (s *Server) Start() error {
 	s.httpService = httpServ
 	s.logger.Printf("rqlite HTTP API on tsnet %s:%d", s.Hostname, defaultHTTPPort)
 
-	// Also start a localhost-only HTTP API for the database/sql driver,
-	// which can't use a custom HTTP client. Bind to :0 for a random port.
-	localLn, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		return fmt.Errorf("listen local http: %w", err)
-	}
-	s.localHTTPLn = localLn
+	// Register a database/sql driver that uses tsnet's HTTP client.
+	s.driverName = registerDriver(s.ts.HTTPClient())
 
-	localHTTPServ := httpd.New("", str, clstrClient, pxy, nil)
-	localHTTPServ.Listener = localLn
-	if err := localHTTPServ.Start(); err != nil {
-		return fmt.Errorf("local http service start: %w", err)
-	}
-	s.localHTTPSrv = localHTTPServ
-	s.logger.Printf("rqlite local HTTP API on %s", localLn.Addr())
-
-	isNew := store.IsNewNode(str.Path())
-
-	// Open the store and bootstrap if new.
+	// Open the store.
 	if err := str.Open(); err != nil {
 		return fmt.Errorf("store open: %w", err)
 	}
-	if isNew {
-		s.logger.Println("bootstrapping single new node")
+
+	// Determine cluster membership after opening (Raft state is now loaded).
+	nodes, err := str.Nodes()
+	if err != nil {
+		return fmt.Errorf("get nodes: %w", err)
+	}
+	hasPeers := len(nodes) > 0
+
+	if hasPeers {
+		// Existing node with Raft state. Raft reconnects to known peers automatically.
+		s.logger.Printf("existing Raft state with %d node(s), rejoining cluster", len(nodes))
+	} else if clusterPrefix(s.Hostname) == "" {
+		// Standalone instance (no hyphen in hostname), bootstrap solo immediately.
+		s.logger.Println("standalone instance, bootstrapping new cluster")
 		if err := str.Bootstrap(store.NewServer(nodeID, raftAddr, true)); err != nil {
 			return fmt.Errorf("bootstrap: %w", err)
 		}
+	} else {
+		// New node with a cluster prefix. Use the Bootstrapper to try joining
+		// an existing cluster or forming one with simultaneously-starting nodes.
+		provider := &tailnetAddressProvider{srv: s}
+		bs := cluster.NewBootstrapper(provider, clstrClient)
+		bootDone := func() bool {
+			leader, _ := str.LeaderAddr()
+			return leader != ""
+		}
+		err := bs.Boot(context.Background(), nodeID, raftAddr, command.Suffrage_VOTER, bootDone, 30*time.Second)
+		if err != nil {
+			// No peers found or join failed. Bootstrap as a single-node cluster.
+			s.logger.Printf("bootstrap discovery failed (%v), bootstrapping solo", err)
+			if err := str.Bootstrap(store.NewServer(nodeID, raftAddr, true)); err != nil {
+				return fmt.Errorf("bootstrap: %w", err)
+			}
+		}
 	}
-	s.logger.Println("rqlite store ready")
+
+	// Wait for a leader to be elected before returning, so callers can
+	// immediately use the database.
+	s.logger.Println("waiting for leader election...")
+	leader, err := str.WaitForLeader(30 * time.Second)
+	if err != nil {
+		return fmt.Errorf("wait for leader: %w", err)
+	}
+	s.logger.Printf("leader elected: %s", leader)
 
 	// Tell the user the node is ready for HTTP, giving some advice on how to connect.
 	s.logger.Printf("connect using the command-line tool via 'rqlite -H %s -p %d'", s.Hostname, defaultHTTPPort)
@@ -202,35 +221,81 @@ func (s *Server) Start() error {
 	return nil
 }
 
-func (s *Server) Wait(maxWait time.Duration) error {
-	deadline := time.Now().Add(maxWait)
+// tailnetAddressProvider implements cluster.AddressProvider by discovering
+// rqloud peers on the tailnet that share our hostname prefix.
+type tailnetAddressProvider struct {
+	srv *Server
+}
 
+func (p *tailnetAddressProvider) Lookup() ([]string, error) {
+	prefix := clusterPrefix(p.srv.Hostname)
+	if prefix == "" {
+		return nil, nil
+	}
+
+	lc, err := p.srv.ts.LocalClient()
+	if err != nil {
+		return nil, fmt.Errorf("get local client: %w", err)
+	}
+	st, err := lc.Status(context.Background())
+	if err != nil {
+		return nil, fmt.Errorf("get status: %w", err)
+	}
+
+	var peers []string
+	for _, peer := range st.Peer {
+		if !peer.Online {
+			continue
+		}
+		if strings.HasPrefix(peer.HostName, prefix) && peer.HostName != p.srv.Hostname {
+			peers = append(peers, net.JoinHostPort(peer.HostName, strconv.Itoa(defaultMuxPort)))
+		}
+	}
+	if len(peers) > 0 {
+		p.srv.logger.Printf("discovered peers: %v", peers)
+	}
+	return peers, nil
+}
+
+// clusterPrefix extracts the cluster name prefix from a hostname.
+// "todo-1" → "todo-", "myapp-node-3" → "myapp-node-".
+// Returns "" if there is no hyphen (standalone instance, no clustering).
+func clusterPrefix(hostname string) string {
+	i := strings.LastIndex(hostname, "-")
+	if i < 0 {
+		return ""
+	}
+	return hostname[:i+1]
+}
+
+func (s *Server) Wait(ctx context.Context) error {
 	lc, err := s.ts.LocalClient()
 	if err != nil {
-		log.Fatal(err)
+		return fmt.Errorf("get local client: %w", err)
 	}
 
-	for time.Now().Before(deadline) {
-		status, err := lc.Status(context.TODO())
+	for {
+		status, err := lc.Status(ctx)
 		if err != nil {
-			return fmt.Errorf("Status: %w", err)
+			return fmt.Errorf("get status: %w", err)
 		}
-		s.logger.Printf("CurrentTailnet: %v", status.CurrentTailnet)
 		if status.CurrentTailnet != nil {
+			s.logger.Printf("connected to tailnet %s", status.CurrentTailnet.Name)
 			return nil
 		}
-		time.Sleep(1 * time.Second)
+		s.logger.Println("waiting for tailnet...")
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("tailscale did not become ready: %w", ctx.Err())
+		case <-time.After(1 * time.Second):
+		}
 	}
-	return fmt.Errorf("tailscale did not become ready")
 }
 
 // Close shuts down the server.
 func (s *Server) Close() error {
 	if s.db != nil {
 		s.db.Close()
-	}
-	if s.localHTTPSrv != nil {
-		s.localHTTPSrv.Close()
 	}
 	if s.httpService != nil {
 		s.httpService.Close()
@@ -261,14 +326,13 @@ func (s *Server) LocalListen(network, addr string) (net.Listener, error) {
 }
 
 // DB returns a database/sql handle connected to the local rqlite node.
-// Uses a localhost-only HTTP listener since gorqlite/stdlib doesn't support
-// custom HTTP clients.
+// Uses a custom driver that routes all HTTP traffic through tsnet.
 func (s *Server) DB() (*sql.DB, error) {
 	if s.db != nil {
 		return s.db, nil
 	}
-	addr := s.localHTTPLn.Addr().String()
-	db, err := sql.Open("rqlite", fmt.Sprintf("http://%s/", addr))
+	url := fmt.Sprintf("http://%s:%d/", s.Hostname, defaultHTTPPort)
+	db, err := sql.Open(s.driverName, url)
 	if err != nil {
 		return nil, fmt.Errorf("open rqlite db: %w", err)
 	}
