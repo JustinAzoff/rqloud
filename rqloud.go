@@ -224,13 +224,8 @@ func (s *Server) Start() error {
 			leader, _ := str.LeaderAddr()
 			return leader != ""
 		}
-		err := bs.Boot(context.Background(), nodeID, raftAddr, command.Suffrage_VOTER, bootDone, 30*time.Second)
-		if err != nil {
-			// No peers found or join failed. Bootstrap as a single-node cluster.
-			s.logger.Printf("bootstrap discovery failed (%v), bootstrapping solo", err)
-			if err := str.Bootstrap(store.NewServer(nodeID, raftAddr, true)); err != nil {
-				return fmt.Errorf("bootstrap: %w", err)
-			}
+		if err := bs.Boot(context.Background(), nodeID, raftAddr, command.Suffrage_VOTER, bootDone, 120*time.Second); err != nil {
+			return fmt.Errorf("bootstrap: %w", err)
 		}
 	}
 
@@ -309,16 +304,19 @@ func (p *tailnetAddressProvider) Lookup() ([]string, error) {
 		return nil, fmt.Errorf("get status: %w", err)
 	}
 
-	var peers []string
+	// Include ourselves so that the notify protocol counts this node too.
+	// (BootstrapExpect requires N notifications including self.)
+	selfIP := st.Self.TailscaleIPs[0].String()
+	peers := []string{net.JoinHostPort(selfIP, strconv.Itoa(defaultMuxPort))}
 	for _, peer := range st.Peer {
 		if !peer.Online || len(peer.TailscaleIPs) == 0 {
 			continue
 		}
-		if strings.HasPrefix(peer.HostName, prefix) && peer.HostName != p.srv.Hostname {
+		if strings.HasPrefix(peer.HostName, prefix) {
 			peers = append(peers, net.JoinHostPort(peer.TailscaleIPs[0].String(), strconv.Itoa(defaultMuxPort)))
 		}
 	}
-	if len(peers) > 0 {
+	if len(peers) > 1 {
 		p.srv.logger.Printf("discovered peers: %v", peers)
 	}
 	return peers, nil

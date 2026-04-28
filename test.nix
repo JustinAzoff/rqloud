@@ -102,33 +102,33 @@ in
         node.succeed(f"echo 'TS_AUTHKEY={authkey}' > /etc/default/counter")
         node.succeed("systemctl start counter")
 
-    # Wait for all nodes to have their local HTTP listener up.
+    # Wait for all nodes to have their local HTTP listener up (allows up to 3 min for bootstrap).
     for node in [node1, node2, node3]:
-        node.wait_for_open_port(8080)
+        node.wait_for_open_port(8080, timeout=180)
 
     # Verify counter starts at 0 on all nodes.
     for node in [node1, node2, node3]:
-        node.wait_until_succeeds("curl -sf --max-time 10 http://localhost:8080/value | grep -q '^0$'")
+        node.wait_until_succeeds("curl -sf --max-time 10 http://localhost:8080/value | grep -q '^0$'", timeout=60)
 
     # Increment on node1.
     node1.succeed("curl -sf --max-time 10 -X POST http://localhost:8080/inc")
 
     # Verify all nodes see 1 (replication).
     for node in [node1, node2, node3]:
-        node.wait_until_succeeds("curl -sf --max-time 10 http://localhost:8080/value | grep -q '^1$'")
+        node.wait_until_succeeds("curl -sf --max-time 10 http://localhost:8080/value | grep -q '^1$'", timeout=30)
 
     # Increment on node2.
     node2.succeed("curl -sf --max-time 10 -X POST http://localhost:8080/inc")
 
     # Verify all nodes see 2.
     for node in [node1, node2, node3]:
-        node.wait_until_succeeds("curl -sf --max-time 10 http://localhost:8080/value | grep -q '^2$'")
+        node.wait_until_succeeds("curl -sf --max-time 10 http://localhost:8080/value | grep -q '^2$'", timeout=30)
 
     # Decrement on node3.
     node3.succeed("curl -sf --max-time 10 -X POST http://localhost:8080/dec")
 
     # Verify all nodes see 1.
     for node in [node1, node2, node3]:
-        node.wait_until_succeeds("curl -sf --max-time 10 http://localhost:8080/value | grep -q '^1$'")
+        node.wait_until_succeeds("curl -sf --max-time 10 http://localhost:8080/value | grep -q '^1$'", timeout=30)
   '';
 }
