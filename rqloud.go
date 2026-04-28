@@ -453,3 +453,8 @@ func (s *Server) WhoIs(r *http.Request) (*apitype.WhoIsResponse, error) {
 	}
 	return lc.WhoIs(r.Context(), r.RemoteAddr)
 }
+
+// TS returns ths
+func (s *Server) TS() *tsnet.Server {
+	return s.ts
+}
