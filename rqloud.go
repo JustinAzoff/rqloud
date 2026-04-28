@@ -92,7 +92,10 @@ func (s *Server) Start() error {
 	if err := s.ts.Start(); err != nil {
 		return fmt.Errorf("tsnet start: %w", err)
 	}
-	s.logger.Println("tsnet started")
+	s.logger.Println("tsnet started, waiting for tailnet...")
+	if err := s.waitForTailnet(5 * time.Minute); err != nil {
+		return fmt.Errorf("tailnet: %w", err)
+	}
 
 	// Listen on the mux port for internode traffic (Raft + cluster).
 	muxLn, err := s.ts.Listen("tcp", fmt.Sprintf(":%d", defaultMuxPort))
@@ -268,7 +271,10 @@ func clusterPrefix(hostname string) string {
 	return hostname[:i+1]
 }
 
-func (s *Server) Wait(ctx context.Context) error {
+func (s *Server) waitForTailnet(timeout time.Duration) error {
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+
 	lc, err := s.ts.LocalClient()
 	if err != nil {
 		return fmt.Errorf("get local client: %w", err)

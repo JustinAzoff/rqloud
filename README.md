@@ -18,9 +18,7 @@ Your application gets a `database/sql` or native [gorqlite](https://github.com/r
 package main
 
 import (
-    "context"
     "log"
-    "time"
     "github.com/rqloud/rqloud"
 )
 
@@ -32,12 +30,6 @@ func main() {
         log.Fatal(err)
     }
     defer srv.Close()
-
-    ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
-    defer cancel()
-    if err := srv.Wait(ctx); err != nil {
-        log.Fatal(err)
-    }
 
     db, err := srv.DB()
     if err != nil {
@@ -81,8 +73,7 @@ srv := &rqloud.Server{
 
 | Method | Returns | Description |
 |--------|---------|-------------|
-| `Start()` | `error` | Initialize tsnet, rqlite store, and HTTP API |
-| `Wait(ctx)` | `error` | Block until the tailnet is ready |
+| `Start()` | `error` | Initialize tsnet, wait for tailnet, start rqlite store and HTTP API |
 | `Close()` | `error` | Graceful shutdown |
 | `DB()` | `*sql.DB, error` | Standard database/sql handle |
 | `Gorqlite()` | `*gorqlite.Connection, error` | Native gorqlite connection (uses tsnet HTTP client) |

@@ -2,7 +2,6 @@
 package main
 
 import (
-	"context"
 	"database/sql"
 	"flag"
 	"fmt"
@@ -14,7 +13,6 @@ import (
 	"strconv"
 	"strings"
 	"syscall"
-	"time"
 
 	"github.com/rqloud/rqloud"
 )
@@ -89,12 +87,6 @@ func main() {
 		log.Fatalf("start: %v", err)
 	}
 	defer srv.Close()
-
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
-	defer cancel()
-	if err := srv.Wait(ctx); err != nil {
-		log.Fatalf("wait: %v", err)
-	}
 
 	db, err := srv.DB()
 	if err != nil {
