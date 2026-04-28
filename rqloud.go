@@ -53,6 +53,12 @@ type Server struct {
 	// bootstraps solo and others join it.
 	BootstrapExpect int
 
+	// RaftHeartbeat controls the Raft heartbeat timeout. All other Raft
+	// timeouts (election, lease, commit) are scaled proportionally from
+	// Raft's default ratios. Higher values reduce idle traffic but
+	// increase failover time. Defaults to 10s (Raft default is 1s).
+	RaftHeartbeat time.Duration
+
 	// Verbose enables verbose tsnet logging.
 	Verbose bool
 
@@ -151,6 +157,22 @@ func (s *Server) Start() error {
 		Dir:    filepath.Join(s.Dir, "rqlite"),
 		ID:     nodeID,
 	}, raftLayer)
+
+	// Scale all Raft timeouts proportionally from the heartbeat.
+	// Raft defaults: heartbeat=1s, election=1s, lease=500ms, commit=50ms.
+	heartbeat := s.RaftHeartbeat
+	if heartbeat == 0 {
+		heartbeat = 10 * time.Second
+	}
+	scale := float64(heartbeat) / float64(time.Second) // ratio vs Raft's 1s default
+	str.HeartbeatTimeout = heartbeat
+	str.ElectionTimeout = heartbeat
+	str.LeaderLeaseTimeout = time.Duration(float64(500*time.Millisecond) * scale)
+	str.CommitTimeout = time.Duration(float64(50*time.Millisecond) * scale)
+	if s.Verbose {
+		str.RaftLogLevel = "DEBUG"
+	}
+
 	s.store = str
 
 	// Create cluster service for internode communication.
