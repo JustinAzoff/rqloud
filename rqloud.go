@@ -115,6 +115,7 @@ func (s *Server) Start() error {
 	raftLn := mux.Listen(cluster.MuxRaftHeader)
 	raftLayer := &tsnetRaftLayer{
 		ln:     raftLn,
+		addr:   NewAddr(s.Hostname, defaultMuxPort),
 		dialer: &tsnetDialer{srv: s.ts, header: cluster.MuxRaftHeader},
 	}
 

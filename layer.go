@@ -9,6 +9,19 @@ import (
 	"tailscale.com/tsnet"
 )
 
+// addr is a simple net.Addr implementation for an advertised hostname:port.
+type addr struct {
+	host string
+	port int
+}
+
+func NewAddr(host string, port int) net.Addr {
+	return &addr{host: host, port: port}
+}
+
+func (a *addr) Network() string { return "tcp" }
+func (a *addr) String() string  { return net.JoinHostPort(a.host, fmt.Sprintf("%d", a.port)) }
+
 // tsnetDialer dials over tsnet and writes a mux header byte, compatible with
 // rqlite's tcp.Mux protocol on the remote end.
 type tsnetDialer struct {
@@ -46,12 +59,13 @@ func (d *tsnetDialer) Dial(address string, timeout time.Duration) (conn net.Conn
 // and a tsnetDialer for Dial.
 type tsnetRaftLayer struct {
 	ln     net.Listener // mux sub-listener for Raft traffic
+	addr   net.Addr     // advertised address (hostname:port)
 	dialer *tsnetDialer
 }
 
 func (l *tsnetRaftLayer) Accept() (net.Conn, error) { return l.ln.Accept() }
 func (l *tsnetRaftLayer) Close() error              { return l.ln.Close() }
-func (l *tsnetRaftLayer) Addr() net.Addr            { return l.ln.Addr() }
+func (l *tsnetRaftLayer) Addr() net.Addr            { return l.addr }
 
 func (l *tsnetRaftLayer) Dial(address string, timeout time.Duration) (net.Conn, error) {
 	return l.dialer.Dial(address, timeout)
