@@ -41,6 +41,9 @@ type Server struct {
 	// AuthKey is the Tailscale auth key. If empty, interactive login is used.
 	AuthKey string
 
+	// AdvertiseTags is a list of ACL tags to advertise (e.g. "tag:todo").
+	AdvertiseTags []string
+
 	// Verbose enables verbose tsnet logging.
 	Verbose bool
 
@@ -79,9 +82,10 @@ func (s *Server) Start() error {
 
 	// Start tsnet.
 	s.ts = &tsnet.Server{
-		Hostname: s.Hostname,
-		Dir:      filepath.Join(s.Dir, "tsnet"),
-		AuthKey:  s.AuthKey,
+		Hostname:      s.Hostname,
+		Dir:           filepath.Join(s.Dir, "tsnet"),
+		AuthKey:       s.AuthKey,
+		AdvertiseTags: s.AdvertiseTags,
 	}
 	if s.Verbose {
 		s.ts.Logf = s.logger.Printf

@@ -3,6 +3,7 @@ package main
 
 import (
 	"database/sql"
+	"flag"
 	"fmt"
 	"html/template"
 	"log"
@@ -70,9 +71,15 @@ type Todo struct {
 }
 
 func main() {
+	instance := flag.String("instance", "todo", "tsnet hostname for this instance")
+	dataDir := flag.String("data-dir", "", "data directory (default: auto based on instance name)")
+	verbose := flag.Bool("verbose", false, "enable verbose logging")
+	flag.Parse()
+
 	srv := &rqloud.Server{
-		Hostname: "todo",
-		Verbose:  os.Getenv("VERBOSE") != "",
+		Hostname: *instance,
+		Dir:      *dataDir,
+		Verbose:  *verbose,
 	}
 
 	log.Println("starting rqloud...")
