@@ -111,21 +111,21 @@ in
         node.wait_until_succeeds("curl -sf --max-time 10 http://localhost:8080/value | grep -q '^0$'")
 
     # Increment on node1.
-    node1.succeed("curl -sf --max-time 10 -X POST -d 'action=inc' http://localhost:8080/")
+    node1.succeed("curl -sf --max-time 10 -X POST http://localhost:8080/inc")
 
     # Verify all nodes see 1 (replication).
     for node in [node1, node2, node3]:
         node.wait_until_succeeds("curl -sf --max-time 10 http://localhost:8080/value | grep -q '^1$'")
 
     # Increment on node2.
-    node2.succeed("curl -sf --max-time 10 -X POST -d 'action=inc' http://localhost:8080/")
+    node2.succeed("curl -sf --max-time 10 -X POST http://localhost:8080/inc")
 
     # Verify all nodes see 2.
     for node in [node1, node2, node3]:
         node.wait_until_succeeds("curl -sf --max-time 10 http://localhost:8080/value | grep -q '^2$'")
 
     # Decrement on node3.
-    node3.succeed("curl -sf --max-time 10 -X POST -d 'action=dec' http://localhost:8080/")
+    node3.succeed("curl -sf --max-time 10 -X POST http://localhost:8080/dec")
 
     # Verify all nodes see 1.
     for node in [node1, node2, node3]:

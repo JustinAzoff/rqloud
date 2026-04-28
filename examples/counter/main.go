@@ -27,8 +27,8 @@ button { font-size: 32px; padding: 10px 30px; margin: 5px; cursor: pointer; }
 </head>
 <body>
 <h1>%d</h1>
-<form method="POST" style="display:inline"><button name="action" value="dec">-</button></form>
-<form method="POST" style="display:inline"><button name="action" value="inc">+</button></form>
+<form method="POST" action="/dec" style="display:inline"><button>-</button></form>
+<form method="POST" action="/inc" style="display:inline"><button>+</button></form>
 </body>
 </html>
 `
@@ -62,15 +62,20 @@ func main() {
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		if r.Method == http.MethodPost {
-			handlePost(w, r, db)
-			return
-		}
-		handleGet(w, r, db)
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		fmt.Fprintf(w, page, getCounter(db))
 	})
 	mux.HandleFunc("/value", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/plain")
 		fmt.Fprintf(w, "%d", getCounter(db))
+	})
+	mux.HandleFunc("POST /inc", func(w http.ResponseWriter, r *http.Request) {
+		db.Exec("UPDATE counter SET value = value + 1")
+		http.Redirect(w, r, "/", http.StatusSeeOther)
+	})
+	mux.HandleFunc("POST /dec", func(w http.ResponseWriter, r *http.Request) {
+		db.Exec("UPDATE counter SET value = value - 1")
+		http.Redirect(w, r, "/", http.StatusSeeOther)
 	})
 
 	// Listen on tsnet for tailnet access.
@@ -100,7 +105,6 @@ func initSchema(db *sql.DB) error {
 	if err != nil {
 		return err
 	}
-	// Insert the initial row if it doesn't exist.
 	_, err = db.Exec(`INSERT INTO counter (value) SELECT 0 WHERE NOT EXISTS (SELECT 1 FROM counter)`)
 	return err
 }
@@ -109,19 +113,4 @@ func getCounter(db *sql.DB) int {
 	var v int
 	db.QueryRow("SELECT value FROM counter").Scan(&v)
 	return v
-}
-
-func handleGet(w http.ResponseWriter, r *http.Request, db *sql.DB) {
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	fmt.Fprintf(w, page, getCounter(db))
-}
-
-func handlePost(w http.ResponseWriter, r *http.Request, db *sql.DB) {
-	switch r.FormValue("action") {
-	case "inc":
-		db.Exec("UPDATE counter SET value = value + 1")
-	case "dec":
-		db.Exec("UPDATE counter SET value = value - 1")
-	}
-	http.Redirect(w, r, "/", http.StatusSeeOther)
 }
