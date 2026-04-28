@@ -13,6 +13,7 @@ import (
 	"strconv"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/rqloud/rqloud"
 )
@@ -87,6 +88,10 @@ func main() {
 		log.Fatalf("start: %v", err)
 	}
 	defer srv.Close()
+
+	if err := srv.Wait(300 * time.Second); err != nil {
+		log.Fatalf("wait: %v", err)
+	}
 
 	db, err := srv.DB()
 	if err != nil {

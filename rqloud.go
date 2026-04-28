@@ -3,6 +3,7 @@
 package rqloud
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"log"
@@ -192,6 +193,28 @@ func (s *Server) Start() error {
 	s.logger.Println("rqlite store ready")
 
 	return nil
+}
+
+func (s *Server) Wait(maxWait time.Duration) error {
+	deadline := time.Now().Add(maxWait)
+
+	lc, err := s.ts.LocalClient()
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	for time.Now().Before(deadline) {
+		status, err := lc.Status(context.TODO())
+		if err != nil {
+			return fmt.Errorf("Status: %w", err)
+		}
+		s.logger.Printf("CurrentTailnet: %v", status.CurrentTailnet)
+		if status.CurrentTailnet != nil {
+			return nil
+		}
+		time.Sleep(1 * time.Second)
+	}
+	return fmt.Errorf("tailscale did not become ready")
 }
 
 // Close shuts down the server.
