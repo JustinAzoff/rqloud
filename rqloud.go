@@ -25,7 +25,7 @@ import (
 
 const (
 	defaultMuxPort  = 4002 // Internode mux (Raft + cluster)
-	defaultHTTPPort = 4001 // rqlite HTTP API
+	defaultHTTPPort = 4001 // rqlite HTTP API (tsnet)
 )
 
 // Server is the main rqloud server. It manages a tsnet node, an embedded
@@ -50,6 +50,11 @@ type Server struct {
 	clstrServ   *cluster.Service
 	mux         *tcp.Mux
 	muxLn       net.Listener
+
+	// localHTTPLn is a localhost-only listener for the rqlite HTTP API,
+	// used by the database/sql driver which can't use a custom HTTP client.
+	localHTTPLn  net.Listener
+	localHTTPSrv *httpd.Service
 
 	db      *sql.DB
 	grqConn *gorqlite.Connection
@@ -154,6 +159,22 @@ func (s *Server) Start() error {
 	s.httpService = httpServ
 	s.logger.Printf("rqlite HTTP API on tsnet %s:%d", s.Hostname, defaultHTTPPort)
 
+	// Also start a localhost-only HTTP API for the database/sql driver,
+	// which can't use a custom HTTP client. Bind to :0 for a random port.
+	localLn, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		return fmt.Errorf("listen local http: %w", err)
+	}
+	s.localHTTPLn = localLn
+
+	localHTTPServ := httpd.New("", str, clstrClient, pxy, nil)
+	localHTTPServ.Listener = localLn
+	if err := localHTTPServ.Start(); err != nil {
+		return fmt.Errorf("local http service start: %w", err)
+	}
+	s.localHTTPSrv = localHTTPServ
+	s.logger.Printf("rqlite local HTTP API on %s", localLn.Addr())
+
 	// Open the store and bootstrap if new.
 	if err := str.Open(); err != nil {
 		return fmt.Errorf("store open: %w", err)
@@ -173,6 +194,9 @@ func (s *Server) Start() error {
 func (s *Server) Close() error {
 	if s.db != nil {
 		s.db.Close()
+	}
+	if s.localHTTPSrv != nil {
+		s.localHTTPSrv.Close()
 	}
 	if s.httpService != nil {
 		s.httpService.Close()
@@ -203,11 +227,14 @@ func (s *Server) LocalListen(network, addr string) (net.Listener, error) {
 }
 
 // DB returns a database/sql handle connected to the local rqlite node.
+// Uses a localhost-only HTTP listener since gorqlite/stdlib doesn't support
+// custom HTTP clients.
 func (s *Server) DB() (*sql.DB, error) {
 	if s.db != nil {
 		return s.db, nil
 	}
-	db, err := sql.Open("rqlite", fmt.Sprintf("http://localhost:%d/", defaultHTTPPort))
+	addr := s.localHTTPLn.Addr().String()
+	db, err := sql.Open("rqlite", fmt.Sprintf("http://%s/", addr))
 	if err != nil {
 		return nil, fmt.Errorf("open rqlite db: %w", err)
 	}
@@ -216,15 +243,17 @@ func (s *Server) DB() (*sql.DB, error) {
 }
 
 // Gorqlite returns a native gorqlite connection to the local rqlite node.
+// Uses tsnet's HTTP client so all traffic stays on the tailnet.
 func (s *Server) Gorqlite() (*gorqlite.Connection, error) {
 	if s.grqConn != nil {
 		return s.grqConn, nil
 	}
-	conn, err := gorqlite.Open(fmt.Sprintf("http://localhost:%d/", defaultHTTPPort))
+	url := fmt.Sprintf("http://%s:%d/", s.Hostname, defaultHTTPPort)
+	conn, err := gorqlite.OpenWithClient(url, s.ts.HTTPClient())
 	if err != nil {
 		return nil, fmt.Errorf("open gorqlite: %w", err)
 	}
-	s.grqConn = &conn
+	s.grqConn = conn
 	return s.grqConn, nil
 }
 
