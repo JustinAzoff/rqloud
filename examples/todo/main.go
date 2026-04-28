@@ -97,6 +97,7 @@ func main() {
 	if err != nil {
 		log.Fatalf("db: %v", err)
 	}
+
 	if err := initSchema(db); err != nil {
 		log.Fatalf("schema: %v", err)
 	}

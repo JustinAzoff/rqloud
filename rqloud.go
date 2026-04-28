@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"time"
 
 	"github.com/rqlite/gorqlite"
@@ -119,8 +120,8 @@ func (s *Server) Start() error {
 
 	// Create the rqlite store.
 	nodeID := s.Hostname
-	raftAddr := fmt.Sprintf("%s:%d", s.Hostname, defaultMuxPort)
-	httpAddr := fmt.Sprintf("%s:%d", s.Hostname, defaultHTTPPort)
+	raftAddr := net.JoinHostPort(s.Hostname, strconv.Itoa(defaultMuxPort))
+	httpAddr := net.JoinHostPort(s.Hostname, strconv.Itoa(defaultHTTPPort))
 
 	str := store.New(&store.Config{
 		DBConf: store.NewDBConfig(),
@@ -180,17 +181,23 @@ func (s *Server) Start() error {
 	s.localHTTPSrv = localHTTPServ
 	s.logger.Printf("rqlite local HTTP API on %s", localLn.Addr())
 
+	isNew := store.IsNewNode(str.Path())
+
 	// Open the store and bootstrap if new.
 	if err := str.Open(); err != nil {
 		return fmt.Errorf("store open: %w", err)
 	}
-	if store.IsNewNode(str.Path()) {
+	if isNew {
 		s.logger.Println("bootstrapping single new node")
 		if err := str.Bootstrap(store.NewServer(nodeID, raftAddr, true)); err != nil {
 			return fmt.Errorf("bootstrap: %w", err)
 		}
 	}
 	s.logger.Println("rqlite store ready")
+
+	// Tell the user the node is ready for HTTP, giving some advice on how to connect.
+	s.logger.Printf("connect using the command-line tool via 'rqlite -H %s -p %d'", s.Hostname, defaultHTTPPort)
+	s.logger.Printf("visit the rqlite console for this node at http://%s/console/", net.JoinHostPort(s.Hostname, strconv.Itoa(defaultHTTPPort)))
 
 	return nil
 }
