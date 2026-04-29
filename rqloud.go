@@ -127,19 +127,13 @@ func (s *Server) Start() error {
 		if err := s.ts.Start(); err != nil {
 			return fmt.Errorf("tsnet start: %w", err)
 		}
-		s.logger.Println("tsnet started, waiting for tailnet...")
-		if err := s.waitForTailnet(5 * time.Minute); err != nil {
-			return fmt.Errorf("tailnet: %w", err)
-		}
-	} else {
-		// Using caller-provided tsnet; derive hostname if not set.
-		if s.Hostname == "" {
-			s.Hostname = s.ts.Hostname
-		}
-		s.logger.Println("using external tsnet, waiting for tailnet...")
-		if err := s.waitForTailnet(5 * time.Minute); err != nil {
-			return fmt.Errorf("tailnet: %w", err)
-		}
+	} else if s.Hostname == "" {
+		s.Hostname = s.ts.Hostname
+	}
+
+	s.logger.Println("waiting for tailnet...")
+	if err := s.waitForTailnet(5 * time.Minute); err != nil {
+		return fmt.Errorf("tailnet: %w", err)
 	}
 
 	// Listen on the mux port for internode traffic (Raft + cluster).
