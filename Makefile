@@ -4,7 +4,10 @@ export CGO_ENABLED CC
 
 .PHONY: build vet tidy test-nixos clean
 
-build: counter todo
+build: rqloud counter todo
+
+rqloud: $(wildcard *.go cmd/rqloud/*.go)
+	go build -o $@ ./cmd/rqloud/
 
 counter: $(wildcard *.go examples/counter/*.go)
 	go build -o $@ ./examples/counter/
@@ -22,4 +25,4 @@ test-nixos: counter
 	nix build path:..#checks.x86_64-linux.integration -L
 
 clean:
-	rm -f todo counter
+	rm -f rqloud todo counter

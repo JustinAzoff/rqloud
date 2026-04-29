@@ -103,6 +103,43 @@ srv := &rqloud.Server{
 
 All traffic — application, database, Raft consensus — stays on the tailnet.
 
+## Standalone Binary
+
+`cmd/rqloud` is a standalone binary that runs a bare rqlite cluster over Tailscale with no application code on top. Use it to deploy a replicated SQLite database accessible via the standard `rqlite` CLI or HTTP API.
+
+```bash
+CGO_ENABLED=1 CC=clang go build -o rqloud ./cmd/rqloud/
+```
+
+Start a single node:
+
+```bash
+./rqloud -instance mydb
+```
+
+Start a 3-node cluster:
+
+```bash
+./rqloud -instance mydb-1 -bootstrap-expect 3
+./rqloud -instance mydb-2 -bootstrap-expect 3
+./rqloud -instance mydb-3 -bootstrap-expect 3
+```
+
+Connect via the `rqlite` CLI over the tailnet:
+
+```bash
+rqlite -H mydb-1 -p 4001
+```
+
+To access rqlite from localhost without the tailnet, use `-local-rqlite-bind`:
+
+```bash
+./rqloud -instance mydb-1 -local-rqlite-bind 127.0.0.1:4001
+rqlite  # connects to localhost:4001
+```
+
+This is useful for local tooling, monitoring, or applications that don't run on the tailnet.
+
 ## Example: Todo App
 
 See [`examples/todo/`](examples/todo/) for a complete per-user todo list application.
