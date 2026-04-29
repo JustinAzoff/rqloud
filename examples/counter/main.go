@@ -37,6 +37,7 @@ func main() {
 	instance := flag.String("instance", "counter", "tsnet hostname for this instance")
 	dataDir := flag.String("data-dir", "", "data directory (default: auto)")
 	bootstrapExpect := flag.Int("bootstrap-expect", 0, "number of nodes expected to form initial cluster")
+	listenAddr := flag.String("listen", ":8080", "local HTTP listen address")
 	verbose := flag.Bool("verbose", false, "enable verbose logging")
 	flag.Parse()
 
@@ -86,12 +87,12 @@ func main() {
 	log.Println("counter listening on tsnet :80")
 	go http.Serve(tsLn, mux)
 
-	// Listen on localhost:8080 for local/test access.
-	localLn, err := net.Listen("tcp", ":8080")
+	// Listen on localhost for local/test access.
+	localLn, err := net.Listen("tcp", *listenAddr)
 	if err != nil {
 		log.Fatalf("local listen: %v", err)
 	}
-	log.Println("counter listening on :8080")
+	log.Printf("counter listening on %s", *listenAddr)
 	go http.Serve(localLn, mux)
 
 	sigCh := make(chan os.Signal, 1)
