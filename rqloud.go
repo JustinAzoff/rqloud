@@ -434,6 +434,12 @@ func (s *Server) Listen(network, addr string) (net.Listener, error) {
 	return s.ts.Listen(network, addr)
 }
 
+// ListenService creates a Tailscale Service listener, advertising this node
+// as hosting the named service. See tsnet.Server.ListenService for details.
+func (s *Server) ListenService(name string, mode tsnet.ServiceMode) (*tsnet.ServiceListener, error) {
+	return s.ts.ListenService(name, mode)
+}
+
 // LocalListen returns a net.Listener on a normal network interface.
 func (s *Server) LocalListen(network, addr string) (net.Listener, error) {
 	return net.Listen(network, addr)
