@@ -33,8 +33,6 @@ const (
 
 // Server is the main rqloud server. It manages a tsnet node, an embedded
 // rqlite store, and provides database access over the tailnet.
-// Server is the main rqloud server. It manages a tsnet node, an embedded
-// rqlite store, and provides database access over the tailnet.
 type Server struct {
 	// Hostname is the tsnet hostname for this node.
 	Hostname string
@@ -60,7 +58,7 @@ type Server struct {
 	// RaftHeartbeat controls the Raft heartbeat timeout. All other Raft
 	// timeouts (election, lease, commit) are scaled proportionally from
 	// Raft's default ratios. Higher values reduce idle traffic but
-	// increase failover time. Defaults to 10s (Raft default is 1s).
+	// increase failover time. Defaults to 3s (Raft default is 1s).
 	RaftHeartbeat time.Duration
 
 	// Verbose enables verbose tsnet logging.
@@ -144,21 +142,6 @@ func (s *Server) Start() error {
 		}
 	}
 
-	// Get our tailnet IP for advertising to peers.
-	lc, err := s.ts.LocalClient()
-	if err != nil {
-		return fmt.Errorf("get local client: %w", err)
-	}
-	st, err := lc.Status(context.Background())
-	if err != nil {
-		return fmt.Errorf("get status: %w", err)
-	}
-	if len(st.Self.TailscaleIPs) == 0 {
-		return fmt.Errorf("no tailscale IPs assigned")
-	}
-	tsIP := st.Self.TailscaleIPs[0].String()
-	s.logger.Printf("tailnet IP: %s", tsIP)
-
 	// Listen on the mux port for internode traffic (Raft + cluster).
 	muxLn, err := s.ts.Listen("tcp", fmt.Sprintf(":%d", defaultMuxPort))
 	if err != nil {
@@ -177,26 +160,34 @@ func (s *Server) Start() error {
 	raftLn := mux.Listen(cluster.MuxRaftHeader)
 	raftLayer := &tsnetRaftLayer{
 		ln:     raftLn,
-		addr:   NewAddr(tsIP, defaultMuxPort),
+		addr:   NewAddr(s.Hostname, defaultMuxPort),
 		dialer: &tsnetDialer{srv: s.ts, header: cluster.MuxRaftHeader},
 	}
 
 	// Create the rqlite store.
 	nodeID := s.Hostname
-	raftAddr := net.JoinHostPort(tsIP, strconv.Itoa(defaultMuxPort))
-	httpAddr := net.JoinHostPort(tsIP, strconv.Itoa(defaultHTTPPort))
+	raftAddr := net.JoinHostPort(s.Hostname, strconv.Itoa(defaultMuxPort))
+	httpAddr := net.JoinHostPort(s.Hostname, strconv.Itoa(defaultHTTPPort))
 
 	str := store.New(&store.Config{
 		DBConf: store.NewDBConfig(),
 		Dir:    filepath.Join(s.Dir, "rqlite"),
 		ID:     nodeID,
 	}, raftLayer)
+	// Skip address resolution — tsnet handles name resolution internally.
+	str.ResolveAddress = func(addr string) (string, error) {
+		h, _, err := net.SplitHostPort(addr)
+		if err != nil {
+			h = addr
+		}
+		return h, nil
+	}
 
 	// Scale all Raft timeouts proportionally from the heartbeat.
 	// Raft defaults: heartbeat=1s, election=1s, lease=500ms, commit=50ms.
 	heartbeat := s.RaftHeartbeat
 	if heartbeat == 0 {
-		heartbeat = 10 * time.Second
+		heartbeat = 3 * time.Second
 	}
 	scale := float64(heartbeat) / float64(time.Second) // ratio vs Raft's 1s default
 	str.HeartbeatTimeout = heartbeat
@@ -288,7 +279,7 @@ func (s *Server) Start() error {
 	// Wait for the store to be fully ready (leader elected, all channels
 	// registered, etc.) before returning so callers can use the database.
 	s.logger.Println("waiting for store to be ready...")
-	deadline := time.Now().Add(30 * time.Second)
+	deadline := time.Now().Add(2 * time.Minute)
 	for !str.Ready() {
 		if time.Now().After(deadline) {
 			return fmt.Errorf("store did not become ready within timeout")
@@ -362,14 +353,13 @@ func (p *tailnetAddressProvider) Lookup() ([]string, error) {
 
 	// Include ourselves so that the notify protocol counts this node too.
 	// (BootstrapExpect requires N notifications including self.)
-	selfIP := st.Self.TailscaleIPs[0].String()
-	peers := []string{net.JoinHostPort(selfIP, strconv.Itoa(defaultMuxPort))}
+	peers := []string{net.JoinHostPort(p.srv.Hostname, strconv.Itoa(defaultMuxPort))}
 	for _, peer := range st.Peer {
-		if !peer.Online || len(peer.TailscaleIPs) == 0 {
+		if !peer.Online {
 			continue
 		}
 		if strings.HasPrefix(peer.HostName, prefix) {
-			peers = append(peers, net.JoinHostPort(peer.TailscaleIPs[0].String(), strconv.Itoa(defaultMuxPort)))
+			peers = append(peers, net.JoinHostPort(peer.HostName, strconv.Itoa(defaultMuxPort)))
 		}
 	}
 	if len(peers) > 1 {
