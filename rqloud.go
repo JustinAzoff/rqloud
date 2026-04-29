@@ -33,6 +33,8 @@ const (
 
 // Server is the main rqloud server. It manages a tsnet node, an embedded
 // rqlite store, and provides database access over the tailnet.
+// Server is the main rqloud server. It manages a tsnet node, an embedded
+// rqlite store, and provides database access over the tailnet.
 type Server struct {
 	// Hostname is the tsnet hostname for this node.
 	Hostname string
@@ -42,9 +44,11 @@ type Server struct {
 	Dir string
 
 	// AuthKey is the Tailscale auth key. If empty, interactive login is used.
+	// Only used when rqloud creates its own tsnet (i.e. not NewWithTSNet).
 	AuthKey string
 
 	// AdvertiseTags is a list of ACL tags to advertise (e.g. "tag:todo").
+	// Only used when rqloud creates its own tsnet (i.e. not NewWithTSNet).
 	AdvertiseTags []string
 
 	// BootstrapExpect is the number of nodes expected to form the initial
@@ -62,6 +66,7 @@ type Server struct {
 	// Verbose enables verbose tsnet logging.
 	Verbose bool
 
+	ownsTS      bool
 	ts          *tsnet.Server
 	store       *store.Store
 	httpService *httpd.Service
@@ -74,6 +79,23 @@ type Server struct {
 	grqConn    *gorqlite.Connection
 
 	logger *log.Logger
+}
+
+// New creates a new rqloud Server that will create and manage its own
+// tsnet node. Call Start() to begin.
+func New() *Server {
+	return &Server{}
+}
+
+// NewWithTSNet creates a new rqloud Server using an existing tsnet.Server.
+// The caller is responsible for the tsnet lifecycle (starting it before
+// calling Start, closing it after calling Close). Hostname is derived
+// from the tsnet server.
+func NewWithTSNet(ts *tsnet.Server) *Server {
+	return &Server{
+		ts:       ts,
+		Hostname: ts.Hostname,
+	}
 }
 
 // Start initializes and starts the tsnet node, rqlite store, and HTTP API.
@@ -91,23 +113,35 @@ func (s *Server) Start() error {
 		return fmt.Errorf("create dir: %w", err)
 	}
 
-	// Start tsnet.
-	s.ts = &tsnet.Server{
-		Hostname:      s.Hostname,
-		Dir:           filepath.Join(s.Dir, "tsnet"),
-		AuthKey:       s.AuthKey,
-		ControlURL:    os.Getenv("RQLOUD_CONTROL_URL"),
-		AdvertiseTags: s.AdvertiseTags,
-	}
-	if s.Verbose {
-		s.ts.Logf = s.logger.Printf
-	}
-	if err := s.ts.Start(); err != nil {
-		return fmt.Errorf("tsnet start: %w", err)
-	}
-	s.logger.Println("tsnet started, waiting for tailnet...")
-	if err := s.waitForTailnet(5 * time.Minute); err != nil {
-		return fmt.Errorf("tailnet: %w", err)
+	if s.ts == nil {
+		// Create and start our own tsnet node.
+		s.ownsTS = true
+		s.ts = &tsnet.Server{
+			Hostname:      s.Hostname,
+			Dir:           filepath.Join(s.Dir, "tsnet"),
+			AuthKey:       s.AuthKey,
+			ControlURL:    os.Getenv("RQLOUD_CONTROL_URL"),
+			AdvertiseTags: s.AdvertiseTags,
+		}
+		if s.Verbose {
+			s.ts.Logf = s.logger.Printf
+		}
+		if err := s.ts.Start(); err != nil {
+			return fmt.Errorf("tsnet start: %w", err)
+		}
+		s.logger.Println("tsnet started, waiting for tailnet...")
+		if err := s.waitForTailnet(5 * time.Minute); err != nil {
+			return fmt.Errorf("tailnet: %w", err)
+		}
+	} else {
+		// Using caller-provided tsnet; derive hostname if not set.
+		if s.Hostname == "" {
+			s.Hostname = s.ts.Hostname
+		}
+		s.logger.Println("using external tsnet, waiting for tailnet...")
+		if err := s.waitForTailnet(5 * time.Minute); err != nil {
+			return fmt.Errorf("tailnet: %w", err)
+		}
 	}
 
 	// Get our tailnet IP for advertising to peers.
@@ -399,7 +433,7 @@ func (s *Server) Close() error {
 	if s.store != nil {
 		s.store.Close(true)
 	}
-	if s.ts != nil {
+	if s.ownsTS && s.ts != nil {
 		s.ts.Close()
 	}
 	return nil
