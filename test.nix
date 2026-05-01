@@ -23,6 +23,7 @@ let
       environment = {
         RQLOUD_CONTROL_URL = "https://headscale";
         TS_NO_LOGS_NO_SUPPORT = "true";
+        HOME = "/var/lib/counter";
       };
       serviceConfig = {
         ExecStart = "${counter}/bin/counter -instance ${name} -data-dir /var/lib/counter -bootstrap-expect 3 -verbose";
