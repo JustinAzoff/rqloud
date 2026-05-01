@@ -37,9 +37,14 @@ type Server struct {
 	// Hostname is the tsnet hostname for this node.
 	Hostname string
 
-	// Dir is the base directory for all state (tsnet + rqlite data).
+	// Dir is the rqlite data directory (Raft logs, snapshots, SQLite DB).
 	// Defaults to a directory based on Hostname in os.UserConfigDir().
 	Dir string
+
+	// TSDir is the tsnet configuration directory. If empty, tsnet picks
+	// a default based on the binary name (see tsnet.Server.Dir).
+	// Only used when rqloud creates its own tsnet (i.e. not NewWithTSNet).
+	TSDir string
 
 	// AuthKey is the Tailscale auth key. If empty, interactive login is used.
 	// Only used when rqloud creates its own tsnet (i.e. not NewWithTSNet).
@@ -116,7 +121,7 @@ func (s *Server) Start() error {
 		s.ownsTS = true
 		s.ts = &tsnet.Server{
 			Hostname:      s.Hostname,
-			Dir:           filepath.Join(s.Dir, "tsnet"),
+			Dir:           s.TSDir,
 			AuthKey:       s.AuthKey,
 			ControlURL:    os.Getenv("RQLOUD_CONTROL_URL"),
 			AdvertiseTags: s.AdvertiseTags,

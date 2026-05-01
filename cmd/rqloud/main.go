@@ -14,24 +14,14 @@
 // For local (non-tailnet) access, use -local-rqlite-bind to expose the
 // rqlite HTTP API on a local address:
 //
-//	rqloud -instance db-1 -local-rqlite-bind 127.0.0.1:4001
+//	rqloud -instance db-1 -local-rqlite-bind 127.0.0.1:4001 /var/lib/rqloud
 //
 // This starts a reverse proxy on localhost that forwards requests to the
 // internal rqlite HTTP API over tsnet.
 //
 // Usage:
 //
-//	rqloud [flags]
-//
-// Flags:
-//
-//	-instance string        tsnet hostname for this node (required)
-//	-data-dir string        data directory (default: ~/.config/rqloud/<instance>)
-//	-bootstrap-expect int   number of nodes expected to form initial cluster
-//	-auth-key string        Tailscale auth key (default: interactive login)
-//	-raft-heartbeat duration Raft heartbeat interval (default: 3s)
-//	-local-rqlite-bind string local address to expose rqlite HTTP API (default: off)
-//	-verbose                enable verbose logging
+//	rqloud [flags] <data directory>
 package main
 
 import (
@@ -51,7 +41,7 @@ import (
 
 func main() {
 	instance := flag.String("instance", "", "tsnet hostname for this node (required)")
-	dataDir := flag.String("data-dir", "", "data directory (default: auto)")
+	configDir := flag.String("config-dir", "", "tsnet configuration directory (\"\" to use default)")
 	bootstrapExpect := flag.Int("bootstrap-expect", 0, "number of nodes expected to form initial cluster")
 	authKey := flag.String("auth-key", "", "Tailscale auth key (default: interactive login)")
 	raftHeartbeat := flag.Duration("raft-heartbeat", 0, "Raft heartbeat interval (default: 3s)")
@@ -64,10 +54,17 @@ func main() {
 		flag.Usage()
 		os.Exit(1)
 	}
+	if flag.NArg() != 1 {
+		fmt.Fprintln(os.Stderr, "Usage: rqloud [flags] <data directory>")
+		flag.Usage()
+		os.Exit(1)
+	}
+	dataDir := flag.Arg(0)
 
 	srv := &rqloud.Server{
 		Hostname:        *instance,
-		Dir:             *dataDir,
+		Dir:             dataDir,
+		TSDir:           *configDir,
 		AuthKey:         *authKey,
 		BootstrapExpect: *bootstrapExpect,
 		RaftHeartbeat:   *raftHeartbeat,
