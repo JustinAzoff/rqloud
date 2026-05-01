@@ -119,9 +119,17 @@ func (s *Server) Start() error {
 	if s.ts == nil {
 		// Create and start our own tsnet node.
 		s.ownsTS = true
+		tsDir := s.TSDir
+		if tsDir == "" {
+			configDir, err := os.UserConfigDir()
+			if err != nil {
+				return fmt.Errorf("get config dir: %w", err)
+			}
+			tsDir = filepath.Join(configDir, "tsnet-"+s.Hostname)
+		}
 		s.ts = &tsnet.Server{
 			Hostname:      s.Hostname,
-			Dir:           s.TSDir,
+			Dir:           tsDir,
 			AuthKey:       s.AuthKey,
 			ControlURL:    os.Getenv("RQLOUD_CONTROL_URL"),
 			AdvertiseTags: s.AdvertiseTags,

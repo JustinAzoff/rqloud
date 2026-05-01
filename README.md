@@ -114,16 +114,18 @@ CGO_ENABLED=1 CC=clang go build -o rqloud ./cmd/rqloud/
 Start a single node:
 
 ```bash
-./rqloud -instance mydb /var/lib/rqloud/mydb
+./rqloud -instance mydb /tmp/rqloud-test/mydb
 ```
 
 Start a 3-node cluster:
 
 ```bash
-./rqloud -instance mydb-1 -bootstrap-expect 3 /var/lib/rqloud/mydb-1
-./rqloud -instance mydb-2 -bootstrap-expect 3 /var/lib/rqloud/mydb-2
-./rqloud -instance mydb-3 -bootstrap-expect 3 /var/lib/rqloud/mydb-3
+./rqloud -instance mydb-1 -bootstrap-expect 3 /tmp/rqloud-test/mydb-1
+./rqloud -instance mydb-2 -bootstrap-expect 3 /tmp/rqloud-test/mydb-2
+./rqloud -instance mydb-3 -bootstrap-expect 3 /tmp/rqloud-test/mydb-3
 ```
+
+The three nodes can all run on the same machine or on three different machines — since all communication happens over the tailnet, it doesn't matter where they are.
 
 Connect via the `rqlite` CLI over the tailnet:
 
@@ -134,7 +136,7 @@ rqlite -H mydb-1 -p 4001
 To access rqlite from localhost without the tailnet, use `-local-rqlite-bind`:
 
 ```bash
-./rqloud -instance mydb-1 -local-rqlite-bind 127.0.0.1:4001 /var/lib/rqloud/mydb-1
+./rqloud -instance mydb-1 -local-rqlite-bind 127.0.0.1:4001 /tmp/rqloud-test/mydb-1
 rqlite  # connects to localhost:4001
 ```
 
