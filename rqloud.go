@@ -145,7 +145,9 @@ func (s *Server) Start() error {
 	}
 
 	s.logger.Println("waiting for tailnet...")
-	if err := s.waitForTailnet(5 * time.Minute); err != nil {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
+	if err := s.Up(ctx); err != nil {
 		return fmt.Errorf("tailnet: %w", err)
 	}
 
@@ -386,31 +388,16 @@ func clusterPrefix(hostname string) string {
 	return hostname[:i+1]
 }
 
-func (s *Server) waitForTailnet(timeout time.Duration) error {
-	ctx, cancel := context.WithTimeout(context.Background(), timeout)
-	defer cancel()
-
-	lc, err := s.ts.LocalClient()
+// Up waits for the tsnet node to connect to the tailnet.
+func (s *Server) Up(ctx context.Context) error {
+	status, err := s.ts.Up(ctx)
 	if err != nil {
-		return fmt.Errorf("get local client: %w", err)
+		return fmt.Errorf("tailnet up: %w", err)
 	}
-
-	for {
-		status, err := lc.Status(ctx)
-		if err != nil {
-			return fmt.Errorf("get status: %w", err)
-		}
-		if status.CurrentTailnet != nil {
-			s.logger.Printf("connected to tailnet %s", status.CurrentTailnet.Name)
-			return nil
-		}
-		s.logger.Println("waiting for tailnet...")
-		select {
-		case <-ctx.Done():
-			return fmt.Errorf("tailscale did not become ready: %w", ctx.Err())
-		case <-time.After(1 * time.Second):
-		}
+	if status.CurrentTailnet != nil {
+		s.logger.Printf("connected to tailnet %s", status.CurrentTailnet.Name)
 	}
+	return nil
 }
 
 // Close shuts down the server.
