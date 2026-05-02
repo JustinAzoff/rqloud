@@ -26,7 +26,7 @@ let
         HOME = "/var/lib/counter";
       };
       serviceConfig = {
-        ExecStart = "${counter}/bin/counter -instance ${name} -data-dir /var/lib/counter -bootstrap-expect 3 -verbose";
+        ExecStart = "${counter}/bin/rqloud-counter -instance ${name} -data-dir /var/lib/counter -bootstrap-expect 3 -verbose";
         EnvironmentFile = "-/etc/default/counter";
         StateDirectory = "counter";
         Restart = "on-failure";

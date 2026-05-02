@@ -87,3 +87,7 @@ require (
 )
 
 replace github.com/armon/go-metrics => github.com/hashicorp/go-metrics v0.5.1
+
+replace github.com/rqlite/rqlite/v10 => github.com/JustinAzoff/rqlite/v10 v10.0.0-20260502123225-0fbee116e925
+
+replace github.com/mattn/go-sqlite3 => github.com/rqlite/go-sqlite3 v1.45.0

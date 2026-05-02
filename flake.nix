@@ -10,26 +10,32 @@
       system = "x86_64-linux";
       pkgs = nixpkgs.legacyPackages.${system};
 
-      # Pre-built binary, built via `make counter` outside of nix.
-      counter = pkgs.stdenv.mkDerivation {
-        pname = "rqloud-counter";
+      rqloud = pkgs.buildGoModule {
+        pname = "rqloud";
         version = "0.0.1";
         src = ./.;
-        dontBuild = true;
-        installPhase = ''
-          mkdir -p $out/bin
-          cp $src/counter $out/bin/counter
+        vendorHash = "sha256-leYwH/HgxaEQQq9DTlmGBGyEfRbCdRw08JW3zG7PD4s=";
+        subPackages = [
+          "cmd/rqloud"
+          "examples/counter"
+          "examples/todo"
+        ];
+        env.CGO_ENABLED = "1";
+
+        postInstall = ''
+          mv $out/bin/counter $out/bin/rqloud-counter
+          mv $out/bin/todo $out/bin/rqloud-todo
         '';
       };
     in
     {
       packages.${system} = {
-        inherit counter;
-        default = counter;
+        inherit rqloud;
+        default = rqloud;
       };
 
       checks.${system}.integration = pkgs.testers.nixosTest (import ./test.nix {
-        inherit counter;
+        counter = rqloud;
       });
     };
 }
