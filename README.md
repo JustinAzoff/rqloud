@@ -4,6 +4,8 @@ rqloud combines [Tailscale](https://tailscale.com/) (tsnet) networking with [rql
 
 Your application gets a `database/sql` or native [gorqlite](https://github.com/rqlite/gorqlite) interface backed by a Raft-replicated SQLite database, with all inter-node communication happening over your Tailscale network.
 
+For a real-world example, see [JustinAzoff/golink](https://github.com/JustinAzoff/golink/tree/rqloud), a fork of [tailscale/golink](https://github.com/tailscale/golink) using rqloud instead of a local SQLite database.
+
 ## Features
 
 - Embedded rqlite — no separate database process to manage
