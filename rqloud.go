@@ -41,8 +41,8 @@ type Server struct {
 	// Defaults to a directory based on Hostname in os.UserConfigDir().
 	Dir string
 
-	// TSDir is the tsnet configuration directory. If empty, tsnet picks
-	// a default based on the binary name (see tsnet.Server.Dir).
+	// TSDir is the tsnet configuration directory. If empty, defaults to
+	// ~/.config/tsnet-<Hostname>/.
 	// Only used when rqloud creates its own tsnet (i.e. not NewWithTSNet).
 	TSDir string
 
@@ -478,7 +478,7 @@ func (s *Server) WhoIs(r *http.Request) (*apitype.WhoIsResponse, error) {
 	return lc.WhoIs(r.Context(), r.RemoteAddr)
 }
 
-// TS returns ths
+// TS returns the internal tsnet.Server
 func (s *Server) TS() *tsnet.Server {
 	return s.ts
 }

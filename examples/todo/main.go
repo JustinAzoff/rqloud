@@ -14,7 +14,7 @@ import (
 	"strings"
 	"syscall"
 
-	"github.com/rqloud/rqloud"
+	"github.com/JustinAzoff/rqloud"
 )
 
 var tmpl = template.Must(template.New("page").Parse(`<!DOCTYPE html>

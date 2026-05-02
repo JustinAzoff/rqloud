@@ -36,7 +36,7 @@ import (
 	"os/signal"
 	"syscall"
 
-	"github.com/rqloud/rqloud"
+	"github.com/JustinAzoff/rqloud"
 )
 
 func main() {

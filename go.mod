@@ -1,4 +1,4 @@
-module github.com/rqloud/rqloud
+module github.com/JustinAzoff/rqloud
 
 go 1.26.1
 

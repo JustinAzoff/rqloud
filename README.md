@@ -6,109 +6,17 @@ Your application gets a `database/sql` or native [gorqlite](https://github.com/r
 
 ## Features
 
-- **Embedded rqlite** — no separate database process to manage
-- **Tailscale networking** — all traffic (Raft consensus, cluster coordination, HTTP API) runs over tsnet
-- **Automatic clustering** — nodes discover each other by hostname prefix and auto-join
-- **User identity** — `WhoIs()` identifies callers by their Tailscale identity
-- **Two database interfaces** — `database/sql` for standard Go code, or native gorqlite for rqlite-specific features
-
-## Quick Start
-
-```go
-package main
-
-import (
-    "log"
-    "github.com/rqloud/rqloud"
-)
-
-func main() {
-    srv := &rqloud.Server{
-        Hostname: "myapp-1",
-    }
-    if err := srv.Start(); err != nil {
-        log.Fatal(err)
-    }
-    defer srv.Close()
-
-    db, err := srv.DB()
-    if err != nil {
-        log.Fatal(err)
-    }
-
-    db.Exec(`CREATE TABLE IF NOT EXISTS kv (key TEXT PRIMARY KEY, value TEXT)`)
-    db.Exec(`INSERT INTO kv (key, value) VALUES (?, ?)`, "hello", "world")
-}
-```
-
-## Clustering
-
-Nodes discover peers automatically by hostname prefix. Name your instances with a shared prefix and a unique suffix separated by a hyphen:
-
-```
-myapp-1
-myapp-2
-myapp-3
-```
-
-The first node to start bootstraps a new single-node cluster. Subsequent nodes discover existing peers on the tailnet and join automatically.
-
-A standalone instance (hostname with no hyphen, e.g. `myapp`) runs as a single non-clustered node.
-
-## API
-
-### `rqloud.Server`
-
-```go
-srv := &rqloud.Server{
-    Hostname:      "myapp-1",        // tsnet hostname (required)
-    Dir:           "/data/myapp-1",  // state directory (default: ~/.config/rqloud/<hostname>)
-    AuthKey:       "tskey-...",      // Tailscale auth key (default: interactive login)
-    AdvertiseTags: []string{"tag:myapp"},
-    Verbose:       false,
-}
-```
-
-**Methods:**
-
-| Method | Returns | Description |
-|--------|---------|-------------|
-| `Start()` | `error` | Initialize tsnet, wait for tailnet, start rqlite store and HTTP API |
-| `Close()` | `error` | Graceful shutdown |
-| `DB()` | `*sql.DB, error` | Standard database/sql handle |
-| `Gorqlite()` | `*gorqlite.Connection, error` | Native gorqlite connection (uses tsnet HTTP client) |
-| `Listen(net, addr)` | `net.Listener, error` | Listen on the tsnet interface (for your app's traffic) |
-| `LocalListen(net, addr)` | `net.Listener, error` | Listen on a normal network interface |
-| `WhoIs(r)` | `*apitype.WhoIsResponse, error` | Identify the Tailscale caller from an HTTP request |
-
-## Architecture
-
-```
-                    tsnet
-                 ┌──────────────────────────────┐
-  App traffic    │  :80    your HTTP handlers    │
-                 │                               │
-  rqlite HTTP    │  :4001  rqlite HTTP API       │
-                 │         (database/sql + CLI)   │
-                 │                               │
-  Raft + cluster │  :4002  tcp.Mux               │
-                 │          ├─ byte 1: Raft       │
-                 │          └─ byte 2: cluster    │
-                 └──────────────────────────────┘
-```
-
-- **Port 4002** carries multiplexed Raft and cluster traffic over tsnet, using rqlite's `tcp.Mux` protocol
-- **Port 4001** serves the rqlite HTTP API on tsnet (accessible via `rqlite -H <hostname> -p 4001`). Both `DB()` and `Gorqlite()` connect through tsnet to this port using a custom `database/sql` driver
-- Your application listens on whatever port you choose (e.g. `:80`)
-
-All traffic — application, database, Raft consensus — stays on the tailnet.
+- Embedded rqlite — no separate database process to manage
+- Tailscale networking — all traffic (Raft consensus, cluster coordination, HTTP API) runs over tsnet, with caller identity via `WhoIs()`
+- Automatic clustering — nodes discover each other by hostname prefix and auto-join
+- Two database interfaces — `database/sql` for standard Go code, or native gorqlite for rqlite-specific features
 
 ## Standalone Binary
 
-`cmd/rqloud` is a standalone binary that runs a bare rqlite cluster over Tailscale with no application code on top. Use it to deploy a replicated SQLite database accessible via the standard `rqlite` CLI or HTTP API.
+`cmd/rqloud` runs a bare rqlite cluster over Tailscale with no application code on top. Use it to deploy a replicated SQLite database accessible via the standard `rqlite` CLI or HTTP API.
 
 ```bash
-CGO_ENABLED=1 CC=clang go build -o rqloud ./cmd/rqloud/
+CGO_ENABLED=1 go build -o rqloud ./cmd/rqloud/
 ```
 
 Start a single node:
@@ -133,7 +41,9 @@ Connect via the `rqlite` CLI over the tailnet:
 rqlite -H mydb-1 -p 4001
 ```
 
-To access rqlite from localhost without the tailnet, use `-local-rqlite-bind`:
+Or open the rqlite web console at `http://mydb-1:4001/`.
+
+To access rqlite from outside of the tailnet, use `-local-rqlite-bind`:
 
 ```bash
 ./rqloud -instance mydb-1 -local-rqlite-bind 127.0.0.1:4001 /tmp/rqloud-test/mydb-1
@@ -142,19 +52,111 @@ rqlite  # connects to localhost:4001
 
 This is useful for local tooling, monitoring, or applications that don't run on the tailnet.
 
+## Quick Start (Library)
+
+```go
+package main
+
+import (
+    "fmt"
+    "log"
+    "net/http"
+
+    "github.com/JustinAzoff/rqloud"
+)
+
+func main() {
+    // Use "hitcount" for a single node, or "hitcount-1", "hitcount-2", etc. for a cluster.
+    srv := &rqloud.Server{
+        Hostname: "hitcount",
+    }
+    if err := srv.Start(); err != nil {
+        log.Fatal(err)
+    }
+    defer srv.Close()
+
+    db, _ := srv.DB()
+    db.Exec(`CREATE TABLE IF NOT EXISTS hits (count INTEGER)`)
+    db.Exec(`INSERT INTO hits (count) SELECT 0 WHERE NOT EXISTS (SELECT 1 FROM hits)`)
+
+    ln, _ := srv.Listen("tcp", ":80")
+    http.Serve(ln, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+        db.Exec(`UPDATE hits SET count = count + 1`)
+        var count int
+        db.QueryRow(`SELECT count FROM hits`).Scan(&count)
+        fmt.Fprintf(w, "hits: %d\n", count)
+    }))
+}
+```
+
+## Clustering
+
+Nodes discover peers automatically by hostname prefix. Name your instances with a shared prefix and a unique suffix separated by a hyphen:
+
+```
+myapp-1
+myapp-2
+myapp-3
+```
+
+<!-- TODO: investigate tag-based peer discovery as an alternative to hostname prefix -->
+
+The first node to start bootstraps a new single-node cluster. Subsequent nodes discover existing peers on the tailnet and join automatically.
+
+A standalone instance (hostname with no hyphen, e.g. `myapp`) runs as a single non-clustered node.
+
+## API
+
+### Constructors
+
+```go
+// Create a server that manages its own tsnet node.
+srv := rqloud.New()
+srv.Hostname = "myapp-1"
+
+// Or use an existing tsnet.Server.
+srv := rqloud.NewWithTSNet(existingTS)
+```
+
+### `rqloud.Server`
+
+```go
+srv := &rqloud.Server{
+    Hostname:      "myapp-1",         // tsnet hostname (required)
+    Dir:           "/data/myapp-1",   // rqlite data directory (default: ~/.config/rqloud/<hostname>)
+    TSDir:         "",                // tsnet config directory (default: ~/.config/tsnet-<hostname>)
+    AuthKey:       "tskey-...",       // Tailscale auth key (default: interactive login)
+    AdvertiseTags: []string{"tag:myapp"},
+    Verbose:       false,
+}
+```
+
+| Method | Returns | Description |
+|--------|---------|-------------|
+| `Start()` | `error` | Initialize tsnet, wait for tailnet, start rqlite store and HTTP API |
+| `Close()` | `error` | Graceful shutdown |
+| `Up(ctx)` | `error` | Wait for the tsnet node to connect to the tailnet |
+| `Listen(net, addr)` | `net.Listener, error` | Listen on the tsnet interface (for your app's traffic) |
+| `ListenService(name, mode)` | `*tsnet.ServiceListener, error` | Register a Tailscale Service listener |
+| `DB()` | `*sql.DB, error` | Standard database/sql handle |
+| `Gorqlite()` | `*gorqlite.Connection, error` | Native gorqlite connection (uses tsnet HTTP client) |
+| `LocalListen(net, addr)` | `net.Listener, error` | Listen on a normal network interface |
+| `WhoIs(r)` | `*apitype.WhoIsResponse, error` | Identify the Tailscale caller from an HTTP request |
+| `TS()` | `*tsnet.Server` | Access the underlying tsnet server |
+
 ## Example: Todo App
 
 See [`examples/todo/`](examples/todo/) for a complete per-user todo list application.
 
 ```bash
-CGO_ENABLED=1 CC=clang go build -o todo ./examples/todo/
-./todo -instance todo-1
+CGO_ENABLED=1 go build -o rqloud-todo ./examples/todo/
+./rqloud-todo -instance todo-1
 ```
 
 Start a second instance to form a cluster:
 
 ```bash
-./todo -instance todo-2
+./rqloud-todo -instance todo-2
 ```
 
 They'll discover each other on the tailnet and replicate automatically.
@@ -164,16 +166,14 @@ They'll discover each other on the tailnet and replicate automatically.
 CGO is required (rqlite uses a fork of go-sqlite3):
 
 ```bash
-CGO_ENABLED=1 CC=clang go build ./...
+CGO_ENABLED=1 go build ./...
 ```
 
-## rqlite Patch
+## rqlite Fork
 
-rqloud requires a small patch to rqlite: a `Listener net.Listener` field on `http.Service` so that `Start()` uses an external listener instead of calling `net.Listen`. This lets us pass in tsnet listeners. Use a [Go workspace](https://go.dev/ref/mod#workspaces) to develop with a local rqlite copy:
+rqloud depends on a [fork of rqlite](https://github.com/JustinAzoff/rqlite) with two small patches:
 
-```
-rqloud-workspace/
-├── go.work
-├── rqloud/
-└── rqlite/    # with Listener field patch
-```
+- `http/service.go` — `Listener` field so `Start()` accepts an external `net.Listener` (for tsnet)
+- `store/store.go` — `ResolveAddress` hook to override DNS resolution (tsnet handles its own name resolution)
+
+These are tracked as separate branches (`custom-http-listener`, `custom-dns`) merged into the `justin-integration` branch, which `go.mod` references via a `replace` directive.
